@@ -1,4 +1,3 @@
-// ...existing code...
 import { useState, useEffect } from 'react'
 import {
   FileText,
@@ -27,28 +26,6 @@ import {
 import { useCategories } from '../../contexts/CategoryContext'
 import './MyMaterials.css'
 
-const LOCAL_STORAGE_KEY = 'plm_local_materials_v1'
-
-const fileToBase64 = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result.split(',')[1]) // base64 string
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-
-const base64ToBlob = (base64, type) => {
-  const binary = atob(base64)
-  const len = binary.length
-  const bytes = new Uint8Array(len)
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return new Blob([bytes], { type })
-}
-
-const createId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-
 const MyMaterials = () => {
   const [viewMode, setViewMode] = useState('grid')
   const [selectedCategory, setSelectedCategory] = useState('all')
@@ -71,57 +48,59 @@ const MyMaterials = () => {
     file: null
   })
 
-  // Load user modules from localStorage on component mount
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        // ensure expected shape and fallback values
-        const formatted = parsed.map(doc => ({
-          id: doc.id || createId(),
-          title: doc.title || 'Untitled',
-          description: doc.description || '',
-          category: doc.category || 'general',
-          tags: doc.tags || [],
-          fileName: doc.fileName || doc.file_name || 'file',
-          fileSize: doc.fileSize || doc.file_size || 0,
-          fileType: doc.fileType || doc.file_type || 'application/octet-stream',
-          uploadDate: doc.uploadDate || doc.upload_date || new Date().toISOString(),
-          lastAccessed: doc.lastAccessed || doc.last_accessed || null,
-          bookmarked: doc.bookmarked || false,
-          // fileData contains base64 string when uploaded locally
-          fileData: doc.fileData || null,
-          // fileUrl kept if present (for legacy/drive links). Prefer fileData for local files.
-          fileUrl: doc.fileUrl || doc.file_url || null,
-        }))
-        setUserModules(formatted)
-      } else {
-        setUserModules([])
-      }
-    } catch (err) {
-      console.error('Failed to load materials from localStorage', err)
-      setUserModules([])
-    }
-  }, [])
 
-  // Persist userModules to localStorage whenever they change
+  // Load user modules from API on component mount
   useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(userModules))
-    } catch (err) {
-      console.error('Failed to save materials to localStorage', err)
-    }
-  }, [userModules])
+    const fetchModules = async () => {
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        console.error('No auth token found. User must be logged in to see materials.');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}/api/materials/documents`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch materials');
+        }
+
+        const data = await response.json();
+        const formattedModules = data.documents.map(doc => ({
+          id: doc.id,
+          title: doc.title,
+          description: doc.description,
+          category: doc.category_id,
+          tags: doc.tags || [],
+          fileName: doc.file_name,
+          fileSize: doc.file_size,
+          fileType: doc.file_type,
+          uploadDate: doc.upload_date,
+          lastAccessed: doc.last_accessed,
+          bookmarked: doc.bookmarked,
+          fileUrl: doc.file_url,
+        }));
+        setUserModules(formattedModules);
+      } catch (error) {
+        console.error('Error fetching materials:', error);
+      }
+    };
+
+    fetchModules();
+  }, []);
 
   // Helper functions
   const getFileIcon = (fileType) => {
-    if (fileType.includes('pdf')) return <FileText className="w-5 h-5 text-red-500" />
-    if (fileType.includes('video')) return <Video className="w-5 h-5 text-blue-500" />
-    if (fileType.includes('image')) return <Image className="w-5 h-5 text-green-500" />
-    if (fileType.includes('audio')) return <Music className="w-5 h-5 text-purple-500" />
-    if (fileType.includes('zip') || fileType.includes('rar')) return <Archive className="w-5 h-5 text-orange-500" />
-    return <File className="w-5 h-5 text-gray-500" />
+    if (fileType.includes('pdf')) return <FileText className="h-5 w-5 text-red-500" />
+    if (fileType.includes('video')) return <Video className="h-5 w-5 text-blue-500" />
+    if (fileType.includes('image')) return <Image className="h-5 w-5 text-green-500" />
+    if (fileType.includes('audio')) return <Music className="h-5 w-5 text-purple-500" />
+    if (fileType.includes('zip') || fileType.includes('rar')) return <Archive className="h-5 w-5 text-orange-500" />
+    return <File className="h-5 w-5 text-gray-500" />
   }
 
   const formatFileSize = (bytes) => {
@@ -148,82 +127,150 @@ const MyMaterials = () => {
       return;
     }
 
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      alert('You must be logged in to upload materials.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', uploadForm.file);
+    formData.append('title', uploadForm.title);
+    formData.append('description', uploadForm.description);
+    // Send null if category is 'general' or not a number
+    const categoryId = isNaN(parseInt(uploadForm.category, 10)) ? null : uploadForm.category;
+    formData.append('category_id', categoryId);
+    
+    const tags = uploadForm.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+    formData.append('tags', JSON.stringify(tags));
+
     try {
-      // convert file to base64 and store locally
-      const base64 = await fileToBase64(uploadForm.file)
-      const newModule = {
-        id: createId(),
-        title: uploadForm.title,
-        description: uploadForm.description,
-        category: isNaN(parseInt(uploadForm.category, 10)) ? uploadForm.category : uploadForm.category,
-        tags: uploadForm.tags ? uploadForm.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
-        fileName: uploadForm.file.name,
-        fileSize: uploadForm.file.size,
-        fileType: uploadForm.file.type || uploadForm.file.type || 'application/octet-stream',
-        uploadDate: new Date().toISOString(),
-        lastAccessed: null,
-        bookmarked: false,
-        fileData: base64, // base64 content for local storage
-        fileUrl: null,
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}/api/materials/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to upload material');
       }
 
-      setUserModules(prev => [newModule, ...prev])
+      // The backend returns a 'document' object. Map its fields to the frontend's 'module' structure.
+      const newModule = {
+        id: result.document.id,
+        title: result.document.title,
+        description: result.document.description,
+        category: result.document.category_id,
+        tags: result.document.tags || [],
+        fileName: result.document.file_name,
+        fileSize: result.document.file_size,
+        fileType: result.document.file_type,
+        uploadDate: result.document.upload_date,
+        lastAccessed: result.document.last_accessed,
+        bookmarked: result.document.bookmarked,
+        fileUrl: result.document.file_url,
+      };
+      
+      setUserModules(prev => [newModule, ...prev]);
       setUploadForm({
         title: '',
         description: '',
         category: 'general',
         tags: '',
         file: null,
-      })
-      setShowUploadModal(false)
+      });
+      setShowUploadModal(false);
+      
+      alert('Material uploaded successfully!');
 
-      alert('Material uploaded successfully! (stored locally)')
     } catch (error) {
-      console.error('Upload error:', error)
-      alert(`Upload failed: ${error.message}`)
+      console.error('Upload error:', error);
+      alert(`Upload failed: ${error.message}`);
     }
-  }
+  };
 
   const handleDownload = async (module) => {
-    // If module has local fileData, use it. Otherwise inform user that external links are not supported offline.
-    const base64 = module.fileData
-    if (!base64) {
-      alert('Download not available for external materials. Please view original link.')
-      return
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      alert('You must be logged in to download materials.');
+      return;
+    }
+
+    // A better way would be to store the file ID from Drive in the database.
+    // For now, let's assume the ID can be parsed from the webViewLink.
+    // e.g., https://drive.google.com/file/d/DRIVE_FILE_ID/view?usp=sharing
+    // or https://docs.google.com/document/d/DRIVE_FILE_ID/edit?usp=sharing
+    const match = module.fileUrl.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)|docs\.google\.com\/[a-z]+\/d\/([a-zA-Z0-9_-]+)/);
+    const fileId = match ? (match[1] || match[2]) : null;
+
+    if (!fileId) {
+        alert('Could not determine the file ID for download.');
+        console.error('Could not parse file ID from URL:', module.fileUrl);
+        return;
     }
 
     try {
-      const blob = base64ToBlob(base64, module.fileType || 'application/octet-stream')
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', module.fileName || 'file')
-      document.body.appendChild(link)
-      link.click()
-      link.parentNode.removeChild(link)
-      window.URL.revokeObjectURL(url)
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}/api/materials/download/${fileId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('File download failed');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', module.fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Download error:', error)
-      alert(error.message)
+      console.error('Download error:', error);
+      alert(error.message);
     }
-  }
+  };
 
   const deleteModule = async (moduleId) => {
     if (confirm('Are you sure you want to delete this module?')) {
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        alert('You must be logged in to delete materials.');
+        return;
+      }
       try {
-        const updatedModules = userModules.filter(module => module.id !== moduleId)
-        setUserModules(updatedModules)
-        alert('Material deleted successfully.')
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}/api/materials/${moduleId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        if (!response.ok) {
+          throw new Error('Failed to delete material');
+        }
+        // Remove deleted module from state
+        const updatedModules = userModules.filter(module => module.id !== moduleId);
+        setUserModules(updatedModules);
+        alert('Material deleted successfully.');
       } catch (error) {
-        console.error('Delete error:', error)
-        alert(`Delete failed: ${error.message}`)
+        console.error('Delete error:', error);
+        alert(`Delete failed: ${error.message}`);
       }
     }
   }
 
   const toggleBookmark = (moduleId) => {
-    const updatedModules = userModules.map(module =>
-      module.id === moduleId
+    // TODO: Implement API call to update bookmark status
+    const updatedModules = userModules.map(module => 
+      module.id === moduleId 
         ? { ...module, bookmarked: !module.bookmarked }
         : module
     )
@@ -231,7 +278,8 @@ const MyMaterials = () => {
   }
 
   const openModule = async (module) => {
-    // Update last accessed time locally
+    // TODO: Implement API call to update last_accessed time
+    // Update last accessed time locally for immediate feedback
     setUserModules(prev => prev.map(m =>
       m.id === module.id
         ? { ...m, lastAccessed: new Date().toISOString() }
@@ -240,29 +288,45 @@ const MyMaterials = () => {
     setSelectedModule(module)
     setShowViewer(true)
 
-    // If we have local data, open it; otherwise try external link (if any)
-    const base64 = module.fileData
-    if (!base64) {
-      if (module.fileUrl) {
-        window.open(module.fileUrl, '_blank')
-        return
-      }
-      alert('Cannot view this material locally. Original link not available.')
-      return
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      alert('You must be logged in to view materials.');
+      return;
+    }
+
+    // Extract file ID from URL
+    const match = module.fileUrl.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)|docs\.google\.com\/[a-z]+\/d\/([a-zA-Z0-9_-]+)/);
+    const fileId = match ? (match[1] || match[2]) : null;
+
+    if (!fileId) {
+      alert('Could not determine the file ID for viewing.');
+      console.error('Could not parse file ID from URL:', module.fileUrl);
+      return;
     }
 
     try {
-      const blob = base64ToBlob(base64, module.fileType || 'application/octet-stream')
-      const url = window.URL.createObjectURL(blob)
-      window.open(url, '_blank')
-      setTimeout(() => window.URL.revokeObjectURL(url), 10000)
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}/api/materials/view/${fileId}?inline=true`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('File view failed');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      // Optionally revokeObjectURL after some time
+      setTimeout(() => window.URL.revokeObjectURL(url), 10000);
     } catch (error) {
-      console.error('View error:', error)
-      alert(error.message)
+      console.error('View error:', error);
+      alert(error.message);
     }
   }
 
-  // Category management functions (keep using CategoryContext helpers)
+  // Category management functions
   const handleAddCategory = async () => {
     if (newCategoryName.trim()) {
       const newCategoryPayload = {
@@ -271,13 +335,12 @@ const MyMaterials = () => {
         icon: 'FileText'
       }
       const result = await addCategory(newCategoryPayload)
-      if (result && result.success) {
+      if (result.success) {
         setNewCategoryName('')
         setNewCategoryColor('#6366f1')
-        // notifyDataSaved helper not present here - using alert for feedback
-        alert('Category added successfully')
+        notifyDataSaved('Category added successfully')
       } else {
-        alert('Failed to add category')
+        alert('Failed to add category: ' + result.error)
       }
     }
   }
@@ -288,46 +351,52 @@ const MyMaterials = () => {
       color: newColor
     }
     const result = await updateCategory(categoryId, updates)
-    if (result && result.success) {
+    if (result.success) {
+      // Update all modules with this category
       const updatedModules = userModules.map(module =>
         module.category === categoryId
           ? { ...module, category: categoryId }
           : module
       )
       setUserModules(updatedModules)
+      // saveUserModules(updatedModules) // Data is now managed by the backend
+
       setEditingCategory(null)
-      alert('Category updated successfully')
+      notifyDataSaved('Category updated successfully')
     } else {
-      alert('Failed to update category')
+      alert('Failed to update category: ' + result.error)
     }
   }
 
   const handleDeleteCategory = async (categoryId) => {
     if (window.confirm('Are you sure you want to delete this category? Materials will be moved to General.')) {
       const result = await deleteCategory(categoryId)
-      if (result && result.success) {
+      if (result.success) {
+        // Move all modules with this category to 'general'
         const updatedModules = userModules.map(module =>
           module.category === categoryId
             ? { ...module, category: 'general' }
             : module
         )
         setUserModules(updatedModules)
-        alert('Category deleted successfully')
+        // saveUserModules(updatedModules) // Data is now managed by the backend
+
+        notifyDataSaved('Category deleted successfully')
       } else {
-        alert('Failed to delete category')
+        alert('Failed to delete category: ' + result.error)
       }
     }
   }
 
-  const filteredModules = userModules.filter(module => {
-    const matchesCategory = selectedCategory === 'all' || module.category === selectedCategory
-    const matchesSearch = searchTerm === '' ||
-      module.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      module.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      module.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
-    const matchesBookmark = !showOnlyBookmarked || module.bookmarked
-    return matchesCategory && matchesSearch && matchesBookmark
-  })
+const filteredModules = userModules.filter(module => {
+  const matchesCategory = selectedCategory === 'all' || module.category === selectedCategory
+  const matchesSearch = searchTerm === '' ||
+    module.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    module.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    module.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
+  const matchesBookmark = !showOnlyBookmarked || module.bookmarked
+  return matchesCategory && matchesSearch && matchesBookmark
+})
 
   return (
     <div className="materials-page">
@@ -777,4 +846,3 @@ const MyMaterials = () => {
 }
 
 export default MyMaterials
-// ...existing code...
