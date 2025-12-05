@@ -1,12 +1,17 @@
 import { Bot, Send, Lightbulb, BookOpen, Target, Clock, Brain, Calculator, FileText, Zap, Sparkles } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import './styles.css'
 
 const AIAssistant = () => {
+  // Initialize Gemini AI
+  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY || '')
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+
   const [messages, setMessages] = useState([
     {
       id: 1,
-      text: "Hello! I'm your AI learning assistant. I can help you with study planning, concept explanations, practice problems, and performance analysis. What would you like to learn about today?",
+      text: "Hello! I'm your AI learning assistant powered by Google Gemini. I can help you with study planning, concept explanations, practice problems, and performance analysis. What would you like to learn about today?",
       sender: 'ai',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       suggestions: [
@@ -20,6 +25,7 @@ const AIAssistant = () => {
   const [newMessage, setNewMessage] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [selectedSubject, setSelectedSubject] = useState('general')
+  const [chatHistory, setChatHistory] = useState([])
   const messagesEndRef = useRef(null)
 
   const subjects = [
@@ -87,7 +93,7 @@ const AIAssistant = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (newMessage.trim()) {
       const userMessage = {
         id: Date.now(),
@@ -97,25 +103,76 @@ const AIAssistant = () => {
       }
 
       setMessages(prev => [...prev, userMessage])
+      const currentMessage = newMessage
       setNewMessage('')
       setIsTyping(true)
 
-      // Simulate AI response
-      setTimeout(() => {
-        const responses = aiResponses[selectedSubject] || aiResponses.general
-        const randomResponse = responses[Math.floor(Math.random() * responses.length)]
+      try {
+        // Check if API key is available
+        if (!import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY === 'your_gemini_api_key_here') {
+          throw new Error('Gemini API key not configured')
+        }
+
+        // Build context-aware prompt based on selected subject
+        const subjectContext = selectedSubject !== 'general'
+          ? `You are a helpful AI tutor specializing in ${subjects.find(s => s.id === selectedSubject)?.name}. `
+          : 'You are a helpful AI learning assistant. '
+
+        const systemPrompt = subjectContext +
+          'Provide clear, educational responses. Break down complex topics into understandable parts. ' +
+          'Use examples when helpful. Keep responses concise but informative.'
+
+        // Start chat with history
+        const chat = model.startChat({
+          history: chatHistory,
+          generationConfig: {
+            maxOutputTokens: 1000,
+            temperature: 0.7,
+          },
+        })
+
+        // Send message with context
+        const result = await chat.sendMessage(systemPrompt + '\n\nUser question: ' + currentMessage)
+        const response = await result.response
+        const aiText = response.text()
+
+        // Update chat history
+        setChatHistory(prev => [
+          ...prev,
+          { role: 'user', parts: [{ text: currentMessage }] },
+          { role: 'model', parts: [{ text: aiText }] }
+        ])
 
         const aiMessage = {
           id: Date.now() + 1,
-          text: randomResponse,
+          text: aiText,
           sender: 'ai',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          suggestions: generateSuggestions(newMessage)
+          suggestions: generateSuggestions(currentMessage)
         }
 
         setMessages(prev => [...prev, aiMessage])
+      } catch (error) {
+        console.error('Gemini API Error:', error)
+
+        // Fallback error message
+        const errorMessage = {
+          id: Date.now() + 1,
+          text: error.message.includes('API key')
+            ? "⚠️ Gemini API key is not configured. Please add your API key to the .env file as VITE_GEMINI_API_KEY. You can get a free API key from Google AI Studio."
+            : "⚠️ I'm having trouble connecting right now. Please check your internet connection and API key, then try again.",
+          sender: 'ai',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          suggestions: [
+            { icon: Lightbulb, text: "Try again", action: "retry" },
+            { icon: BookOpen, text: "Learn more", action: "learn" }
+          ]
+        }
+
+        setMessages(prev => [...prev, errorMessage])
+      } finally {
         setIsTyping(false)
-      }, 1000 + Math.random() * 2000)
+      }
     }
   }
 

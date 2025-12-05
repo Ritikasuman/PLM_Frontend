@@ -85,7 +85,6 @@ const Layout = ({ children }) => {
     { name: 'My Materials', href: '/my-materials', icon: BookOpen },
     { name: 'Study Planner', href: '/planner', icon: Calendar },
     { name: 'Progress Tracker', href: '/progress', icon: TrendingUp },
-    { name: 'Mock Tests', href: '/tests', icon: FileText },
     { name: 'Mentorship', href: '/mentorship', icon: Users },
     { name: 'Chat', href: '/chat', icon: MessageCircle },
     { name: 'Career', href: '/career', icon: Briefcase },

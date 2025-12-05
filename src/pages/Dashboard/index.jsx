@@ -638,7 +638,7 @@ const Dashboard = () => {
               </div>
               <span className="action-label">Find Mentor</span>
             </button>
-            <button
+            {/* <button
               className="action-btn primary"
               onClick={() => handleQuickAction('Take Test')}
             >
@@ -646,7 +646,7 @@ const Dashboard = () => {
                 <Award size={24} color="white" />
               </div>
               <span className="action-label">Take Test</span>
-            </button>
+            </button> */}
             <button
               className="action-btn primary"
               onClick={() => handleQuickAction('View Progress')}
@@ -670,42 +670,9 @@ const Dashboard = () => {
           setTotalStudyHours(hours)
         }}
       />
-
+  
       {/* Test Performance Section */}
-      <div className="card">
-        <div className="card-header">
-          <h2 className="card-title">Test Performance</h2>
-          <p className="card-subtitle">Your recent test scores in your field of study</p>
-        </div>
-        
-        {/* Show empty state if no relevant test scores */}
-        {getRelevantTestScores().length === 0 ? (
-          <div className="empty-state">
-            <TrendingUp size={48} className="empty-icon" />
-            <h3>No test scores yet</h3>
-            <p>Complete some tests in your field to see your performance here</p>
-            <button 
-              className="btn-primary"
-              onClick={() => window.location.href = '/mock-tests'}
-            >
-              Take a Test
-            </button>
-          </div>
-        ) : (
-          <div className="score-cards">
-            {getRelevantTestScores().map((score, index) => (
-              <div key={index} className="score-card">
-                <div className="score-change">
-                  {score.change > 0 ? '+' : ''}{score.change}%
-                </div>
-                <h3 className="score-subject">{score.subject}</h3>
-                <div className="score-value">{score.score}%</div>
-                <div className="score-label">Average Score</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/*  */}
 
       {/* Recommended Tests */}
       {recommendedTests.length > 0 && (
